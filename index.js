@@ -1,6 +1,9 @@
 const express = require('express');
-const app = express();
 const bodyParser = require("body-parser");
+const jwt = require("jsonwebtoken")
+require('dotenv').config()
+
+const app = express();
 app.use(express.json());
 app.use(bodyParser.json())
 let ADMINS = [];
@@ -9,31 +12,51 @@ let COURSES = [];
 let courseIdCounter = 0
 
 // Admin Authentication
+const generateAdminToken = (target) => {
+  const token = jwt.sign(target, process.env.ADMIN_SECRET_KEY, { expiresIn: "2 days" }) // we have to pass object as target to use expiresIN as string
+  return token
+}
+
 const adminAuthenticate = (req, res, next) => {
-  const { username, password } = req.headers;
-  let adminExist = ADMINS.find(data => data.username === username && data.password === password);
-  if (adminExist) {
-    next()
+  const { authorization } = req.headers;
+  if (authorization) {
+    let token = authorization.split(' ')[1]
+    jwt.verify(token, process.env.ADMIN_SECRET_KEY, (err, data) => {
+      if (err) {
+        return res.status(403).send({ error: "Forbidden" })
+      }
+      req.user = data.username;
+      next()
+    })
   } else {
-    return res.status(401).send({ error: "Unauthorized" })
+    res.status(401).send({ error: "Unauthorized" })
   }
 }
 
 // User Authentication
+const generateUserToken = (target) => {
+  const token = jwt.sign(target, process.env.CLIENt_SECRET_KEY, { expiresIn: "2 days" })
+  return token
+}
+
 const userAuthenticate = (req, res, next) => {
-  const { username, password } = req.headers
-  let userExist = USERS.find(user => user.username === username && user.password === password)
-  if (userExist) {
-    req.user = userExist
-    next()
+  const { authorization } = req.headers;
+  if (authorization) {
+    let token = authorization.split(' ')[1]
+    jwt.verify(token, process.env.CLIENt_SECRET_KEY, (err, data) => {
+      if (err) {
+        return res.status(403).send({ error: "Forbidden" })
+      }
+      req.user = data.username;
+      next()
+    })
   } else {
-    return res.status(401).send({ error: "Unauthorized" })
+    res.status(401).send({ error: "Unauthorized" })
   }
 }
 
 // Admin routes
 app.post('/admin/signup', (req, res) => {
-  console.log(req.body)
   let uname = req.body.username
   let pass = req.body.password
   if (uname && pass) {
@@ -43,20 +66,27 @@ app.post('/admin/signup', (req, res) => {
     }
     else {
       let credential = { username: uname, password: pass }
+      let token = generateAdminToken({ username: uname })
       ADMINS.push(credential)
-      return res.status(201).send({ message: 'Admin created successfully' })
+      return res.status(201).send({ message: 'Admin created successfully', token })
     }
   }
   res.status(400).send({ error: "Bad request" })
 });
 
-app.post('/admin/login', adminAuthenticate, (req, res) => {
-  res.send({ message: "Logged in successfully" })
+app.post('/admin/login', (req, res) => {
+  const { username, password } = req.headers;
+  let adminExist = ADMINS.find(data => data.username === username && data.password === password);
+  if (adminExist) {
+    let token = generateAdminToken({ username })
+    return res.send({ message: "Logged in successfully", token })
+  }
+  res.status(401).send({ error: "User not found" })
+
 });
 
 app.post('/admin/courses', adminAuthenticate, (req, res) => {
   // logic to create a course
-  console.log(req.body)
   let course = {
     id: ++courseIdCounter,
     title: req.body.title,
@@ -94,16 +124,23 @@ app.post('/users/signup', (req, res) => {
     if (existUser) {
       return res.status(409).send({ error: "Username already exist" })
     }
+    const token = generateUserToken({ username })
     USERS.push({ username, password, purchasedCourse: [] })
-    console.log(USERS)
-    return res.status(201).send({ message: 'User created successfully' })
+    return res.status(201).send({ message: 'User created successfully', token })
   }
   res.status(400).send({ error: "Bad request" })
 });
 
-app.post('/users/login', userAuthenticate, (req, res) => {
+app.post('/users/login', (req, res) => {
   // logic to log in user
-  res.send({ message: "Logged in successfully" })
+  const { username, password } = req.headers
+  let userExist = USERS.find(user => user.username === username && user.password === password)
+  if (userExist) {
+    const token = generateUserToken({ username })
+    return res.send({ message: "Logged in successfully", token })
+  }
+  res.status(401).send({ error: "User not found" })
+
 });
 
 app.get('/users/courses', userAuthenticate, (req, res) => {
@@ -116,8 +153,12 @@ app.post('/users/courses/:courseId', userAuthenticate, (req, res) => {
   const courseId = parseInt(req.params.courseId);
   let selectedCourse = COURSES.find(co => co.id === courseId && co.published);
   if (selectedCourse) {
-    req.user.purchasedCourse.push(selectedCourse)
-    res.send({ message: 'Course purchased successfully' })
+    let currentUser = USERS.find(user => user.username === req.user)
+    if (currentUser) {
+      currentUser.purchasedCourse.push(selectedCourse)
+      return res.send({ message: 'Course purchased successfully' })
+    }
+    res.sendStatus(500)
   } else {
     res.status(404).send({ "error": "Course not found" })
   }
@@ -125,7 +166,12 @@ app.post('/users/courses/:courseId', userAuthenticate, (req, res) => {
 
 app.get('/users/purchasedCourses', userAuthenticate, (req, res) => {
   // logic to view purchased courses
-  res.send({"purchasecourse":req.user.purchasedCourse})
+  let currentUser = USERS.find(user => user.username === req.user)
+  if (currentUser) {
+    res.send({ "purchasecourse": currentUser.purchasedCourse })
+  } else {
+    res.sendStatus(500)
+  }
 });
 
 app.listen(3000, () => {
