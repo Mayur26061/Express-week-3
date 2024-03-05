@@ -2,11 +2,13 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
+const cors = require("cors")
 require("dotenv").config();
 
 const { User, Admin, Course } = require("./schema");
 
 const app = express();
+app.use(cors())
 app.use(express.json());
 app.use(bodyParser.json());
 
@@ -29,7 +31,7 @@ const adminAuthenticate = (req, res, next) => {
       req.user = data.username;
       next();
     });
-  } else {
+  } else {  
     res.status(401).send({ error: "Unauthorized" });
   }
 };
@@ -88,7 +90,7 @@ app.post("/admin/login", async (req, res) => {
     let token = generateAdminToken({ id: adminExist._id, username });
     return res.send({ message: "Logged in successfully", token });
   }
-  res.status(401).send({ error: "User not found" });
+  res.status(200).send({ error: "User not found" });
 });
 
 app.post("/admin/courses", adminAuthenticate, async (req, res) => {
@@ -97,7 +99,7 @@ app.post("/admin/courses", adminAuthenticate, async (req, res) => {
     title: req.body.title,
     description: req.body.description,
     price: req.body.price || 0,
-    imageLink: req.body.imageLink,
+    imageLink: req.body.imageLink || "",
     published: req.body.published || false,
   };
   const newCourse = await Course.create(course);
@@ -132,6 +134,17 @@ app.get("/admin/courses", adminAuthenticate, async (req, res) => {
   res.send({ courses: course });
 });
 
+app.get("/admin/getcourse",adminAuthenticate,async(req,res)=>{
+  const course = await Course.findById(req.query.courseId)
+  if (!course){
+    return res.status(500).send({error:"Something went wrong"})
+  }
+  res.send({course})
+})
+
+app.get("/admin/me",adminAuthenticate,async(req,res)=>{
+  res.send({user:req.user})
+})
 // User routes
 app.post("/users/signup", async (req, res) => {
   // logic to sign up user
